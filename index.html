@@ -55,6 +55,27 @@ canvas {
     font-size: 22px;
     touch-action: none;
 }
+
+.lang-box {
+    position: absolute;
+    bottom: 15px;
+    right: 15px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: #d9c4ff;
+    font-size: 13px;
+}
+
+.lang-box select {
+    background: #35105eee;
+    color: white;
+    border: 2px solid #a86cff;
+    border-radius: 10px;
+    padding: 6px 8px;
+    font-family: monospace;
+    font-size: 15px;
+}
 </style>
 </head>
 
@@ -68,6 +89,18 @@ canvas {
     <button data-key="ArrowUp">▲</button>
     <button data-key="ArrowDown">▼</button>
     <button data-key="ArrowRight">▶</button>
+</div>
+
+<div class="lang-box">
+    <span id="langStatus"></span>
+    <select id="langSelect" aria-label="Language">
+        <option value="en">🌐 English</option>
+        <option value="he">עברית</option>
+        <option value="ar">العربية</option>
+        <option value="ru">Русский</option>
+        <option value="es">Español</option>
+        <option value="fr">Français</option>
+    </select>
 </div>
 </div>
 
@@ -99,6 +132,99 @@ let shake = 0;
 let invincible = 0;
 
 const rand = (a,b) => Math.random()*(b-a)+a;
+
+// ===== Languages =====
+const STRINGS_EN = {
+    level: "LVL",
+    score: "SCORE",
+    points: "+10pt",
+    gameOver: "GAME OVER",
+    finalScore: "FINAL SCORE:",
+    playAgain: "PRESS R OR TAP TO PLAY AGAIN"
+};
+
+// Built-in (hand-written) translations: instant, no API call
+const BUILTIN = {
+    en: STRINGS_EN,
+    he: {
+        level: "שלב",
+        score: "ניקוד",
+        points: "+10 נק׳",
+        gameOver: "המשחק נגמר",
+        finalScore: "ניקוד סופי:",
+        playAgain: "לחצו R או געו במסך כדי לשחק שוב"
+    }
+};
+
+const RTL_LANGS = ["he", "ar"];
+let lang = "en";
+let T = STRINGS_EN;
+
+function safeGet(k){ try { return localStorage.getItem(k); } catch(e){ return null; } }
+function safeSet(k,v){ try { localStorage.setItem(k,v); } catch(e){} }
+
+// Other languages come from the free MyMemory translation API (no key needed)
+async function translateViaApi(target) {
+    const cached = safeGet("so_lang_" + target);
+    if (cached) { try { return JSON.parse(cached); } catch(e){} }
+
+    const keysList = Object.keys(STRINGS_EN);
+    const results = await Promise.all(keysList.map(async k => {
+        const source = k === "points" ? "points" : STRINGS_EN[k];
+        const url = "https://api.mymemory.translated.net/get?q=" +
+            encodeURIComponent(source) + "&langpair=en|" + target;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const data = await res.json();
+        const text = data && data.responseData && data.responseData.translatedText;
+        if (!text || data.responseStatus !== 200) throw new Error("bad response");
+        return [k, text];
+    }));
+
+    const out = Object.fromEntries(results);
+    out.points = "+10 " + out.points;
+    safeSet("so_lang_" + target, JSON.stringify(out));
+    return out;
+}
+
+const langSelect = document.getElementById("langSelect");
+const langStatus = document.getElementById("langStatus");
+
+async function setLanguage(code) {
+    langSelect.value = code;
+    safeSet("so_lang", code);
+
+    if (BUILTIN[code]) {
+        lang = code; T = BUILTIN[code];
+        langStatus.textContent = "";
+        return;
+    }
+
+    langStatus.textContent = "…";
+    try {
+        const strings = await translateViaApi(code);
+        if (langSelect.value !== code) return; // user switched again meanwhile
+        lang = code; T = strings;
+        langStatus.textContent = "";
+    } catch (err) {
+        console.warn("Translation failed:", err);
+        lang = "en"; T = STRINGS_EN;
+        langSelect.value = "en";
+        langStatus.textContent = "⚠ offline";
+        setTimeout(() => langStatus.textContent = "", 2500);
+    }
+}
+
+langSelect.addEventListener("change", () => setLanguage(langSelect.value));
+setLanguage(safeGet("so_lang") || "en");
+
+// Draw text with correct direction for Hebrew/Arabic; maxW stops long translations overflowing
+function text(str, x, y, maxW) {
+    ctx.direction = RTL_LANGS.includes(lang) ? "rtl" : "ltr";
+    if (maxW) ctx.fillText(str, x, y, maxW);
+    else ctx.fillText(str, x, y);
+    ctx.direction = "ltr";
+}
 
 function polygon(points, color) {
     ctx.fillStyle = color;
@@ -223,6 +349,11 @@ document.querySelectorAll(".controls button").forEach(btn=>{
     btn.addEventListener("pointerup",release);
     btn.addEventListener("pointercancel",release);
     btn.addEventListener("lostpointercapture",release);
+});
+
+// Tap / click the game to restart after game over
+canvas.addEventListener("pointerdown",()=>{
+    if(gameOver) resetGame();
 });
 
 function distance(a,b) {
@@ -377,7 +508,8 @@ function drawHUD() {
     // Level
     ctx.fillStyle="white";
     ctx.font="bold 30px monospace";
-    ctx.fillText("LVL "+level,362,50);
+    ctx.textAlign="left";
+    text(T.level+" "+level,362,50,98);
 
     // Progress bar
     rect(465,26,187,27,"#163c92");
@@ -388,6 +520,7 @@ function drawHUD() {
     // Coins
     ctx.fillStyle="#fff000";
     ctx.font="bold 27px monospace";
+    ctx.textAlign="left";
     ctx.fillText(coins,907,49);
 
     glow(985,39,19,"#ffdc00");
@@ -706,7 +839,8 @@ function draw() {
     if(frame%200<60){
         ctx.fillStyle="#ffffff";
         ctx.font="bold 22px monospace";
-        ctx.fillText("+10pt",445,236);
+        ctx.textAlign="left";
+        text(T.points,445,236,140);
     }
 
     drawHUD();
@@ -714,7 +848,8 @@ function draw() {
     // Score display
     ctx.fillStyle="#ffffff";
     ctx.font="bold 17px monospace";
-    ctx.fillText("SCORE "+score,18,105);
+    ctx.textAlign="left";
+    text(T.score+" "+score,18,105,300);
 
     // Game over
     if(gameOver){
@@ -728,16 +863,16 @@ function draw() {
 
         ctx.fillStyle="#ff60bc";
         ctx.font="bold 58px monospace";
-        ctx.fillText("GAME OVER",W/2,175);
+        text(T.gameOver,W/2,175,W-80);
 
         ctx.shadowBlur=0;
         ctx.fillStyle="white";
         ctx.font="bold 25px monospace";
-        ctx.fillText("FINAL SCORE: "+score,W/2,230);
+        text(T.finalScore+" "+score,W/2,230,W-80);
 
         ctx.fillStyle="#ffe22d";
         ctx.font="bold 20px monospace";
-        ctx.fillText("PRESS R TO PLAY AGAIN",W/2,290);
+        text(T.playAgain,W/2,290,W-80);
 
         ctx.textAlign="left";
     }
