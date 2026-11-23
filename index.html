@@ -35,6 +35,7 @@ canvas {
     border: 2px solid #33206b;
     box-shadow: 0 0 35px #6c21c9;
     touch-action: none;
+    cursor: crosshair;
 }
 
 .controls {
@@ -132,6 +133,20 @@ canvas {
 .stats { color: #bfe9ff; font-size: 15px; line-height: 1.5; }
 .row { display: flex; gap: 8px; }
 
+.lb-list {
+    list-style: none;
+    min-width: 280px;
+    max-height: 230px;
+    overflow-y: auto;
+    font-size: 17px;
+    background: #120a33cc;
+    border: 2px solid #a86cff;
+    border-radius: 12px;
+    padding: 8px 14px;
+}
+.lb-list li { display: flex; justify-content: space-between; gap: 20px; padding: 3px 0; }
+.lb-list li.me { color: #ffe22d; font-weight: bold; }
+
 .game-over-bar {
     position: absolute;
     left: 50%;
@@ -163,12 +178,21 @@ canvas {
         <button class="menu-btn primary" id="btnGuest" data-i18n="playGuest"></button>
         <button class="menu-btn" id="btnShowSignIn" data-i18n="signIn"></button>
         <button class="menu-btn" id="btnShowSignUp" data-i18n="signUp"></button>
+        <button class="menu-btn small" id="btnLb1" data-i18n="leaderboard"></button>
     </div>
 
     <div id="menuLoggedIn" class="auth-form hidden">
         <button class="menu-btn primary" id="btnPlay" data-i18n="play"></button>
+        <button class="menu-btn" id="btnLb2" data-i18n="leaderboard"></button>
         <button class="menu-btn" id="btnLogout" data-i18n="logout"></button>
     </div>
+</div>
+
+<!-- Leaderboard -->
+<div id="lbScreen" class="overlay hidden">
+    <div class="title" data-i18n="leaderboard"></div>
+    <ol id="lbList" class="lb-list"></ol>
+    <button class="menu-btn small" id="lbBack" data-i18n="back"></button>
 </div>
 
 <!-- Sign in / Sign up -->
@@ -219,11 +243,16 @@ let enemies = [];
 let particles = [];
 let stars = [];
 let comets = [];
+let bullets = [];
+let floaters = [];
+let shootCooldown = 0;
+const mouse = { x: W/2, y: 150, down: false };
 
 let score = 0;
 let coins = 0;
 let state = "menu";   // "menu" | "auth" | "playing"
 let newBest = false;
+let startFrame = 0;
 let lives = 3;
 let level = 2;
 let progress = 0;
@@ -259,7 +288,12 @@ const STRINGS_EN = {
     bestScore: "Best score",
     gamesPlayed: "Games played",
     errUser: "Username: 3-16 letters, numbers or _",
-    errPass: "Password must be at least 4 characters",
+    errPass: "Password must be at least 6 characters",
+    errNet: "Connection problem, try again",
+    loading: "Loading...",
+    leaderboard: "🏆 Leaderboard",
+    noScores: "No scores yet",
+    aimHint: "Aim with the mouse, click or SPACE to shoot",
     errMatch: "Passwords do not match",
     errTaken: "That username is taken",
     errWrong: "Wrong username or password"
@@ -292,7 +326,12 @@ const BUILTIN = {
         bestScore: "שיא",
         gamesPlayed: "משחקים",
         errUser: "שם משתמש: 3-16 אותיות באנגלית, מספרים או _",
-        errPass: "הסיסמה חייבת להכיל לפחות 4 תווים",
+        errPass: "הסיסמה חייבת להכיל לפחות 6 תווים",
+        errNet: "בעיית חיבור, נסו שוב",
+        loading: "טוען...",
+        leaderboard: "🏆 טבלת שיאים",
+        noScores: "אין עדיין שיאים",
+        aimHint: "כוונו עם העכבר, לחצו או רווח כדי לירות",
         errMatch: "הסיסמאות לא תואמות",
         errTaken: "שם המשתמש תפוס",
         errWrong: "שם משתמש או סיסמה שגויים"
@@ -308,7 +347,7 @@ function safeSet(k,v){ try { localStorage.setItem(k,v); } catch(e){} }
 
 // Other languages come from the free MyMemory translation API (no key needed)
 async function translateViaApi(target) {
-    const cached = safeGet("so_lang_v2_" + target);
+    const cached = safeGet("so_lang_v4_" + target);
     if (cached) { try { return JSON.parse(cached); } catch(e){} }
 
     const keysList = Object.keys(STRINGS_EN);
@@ -326,7 +365,7 @@ async function translateViaApi(target) {
 
     const out = Object.fromEntries(results);
     out.points = "+10 " + out.points;
-    safeSet("so_lang_v2_" + target, JSON.stringify(out));
+    safeSet("so_lang_v4_" + target, JSON.stringify(out));
     return out;
 }
 
@@ -439,6 +478,9 @@ function resetGame() {
     enemies=[];
     particles=[];
     comets=[];
+    bullets=[];
+    floaters=[];
+    shootCooldown=0;
 
     for(let i=0;i<5;i++) spawnCrystal();
     for(let i=0;i<3;i++) spawnEnemy();
@@ -454,10 +496,20 @@ function spawnCrystal() {
     });
 }
 
+function farSpot() {
+    // a spot not too close to the player, so aliens never spawn on top of you
+    for(let i=0;i<20;i++){
+        const p={x:rand(50,W-50),y:rand(70,300)};
+        if(!player || Math.hypot(p.x-(player.x+30),p.y-(player.y+30))>280) return p;
+    }
+    return {x:player.x>W/2?60:W-60,y:80};
+}
+
 function spawnEnemy() {
+    const p=farSpot();
     enemies.push({
-        x:rand(50,W-50),
-        y:rand(65,270),
+        x:p.x,
+        y:p.y,
         type:Math.floor(rand(0,3)),
         phase:rand(0,10),
         speed:rand(.4,1.1),
@@ -465,7 +517,70 @@ function spawnEnemy() {
     });
 }
 
-// ===== Accounts & saves (stored in this browser's localStorage) =====
+// ===== Cloud saves (Firebase) =====
+// Paste your Firebase web config here. While apiKey is empty, accounts are saved
+// only in this browser (local mode), so the game still works.
+const FIREBASE_CONFIG = {
+    apiKey: "",
+    authDomain: "",
+    projectId: "",
+    appId: ""
+};
+const CLOUD = !!FIREBASE_CONFIG.apiKey;
+const FB_VER = "10.12.2";
+const EMAIL_DOMAIN = "@spaceolympics.game"; // fake email made from the username, never shown
+
+let fb = null;          // { auth, db, A (auth functions), F (firestore functions) }
+let cloudUser = null;   // { uid, name, save }
+let cloudReady = !CLOUD;
+
+async function initCloud() {
+    const base = "https://www.gstatic.com/firebasejs/" + FB_VER + "/";
+    const [appMod, A, F] = await Promise.all([
+        import(base + "firebase-app.js"),
+        import(base + "firebase-auth.js"),
+        import(base + "firebase-firestore.js")
+    ]);
+    const app = appMod.initializeApp(FIREBASE_CONFIG);
+    fb = { auth: A.getAuth(app), db: F.getFirestore(app), A, F };
+
+    A.onAuthStateChanged(fb.auth, async user => {
+        if (user) {
+            if (!cloudUser || cloudUser.uid !== user.uid) {
+                try { cloudUser = await loadCloudUser(user); }
+                catch (e) { console.warn(e); cloudUser = { uid: user.uid, name: user.email.split("@")[0], save: emptySave() }; }
+            }
+            session = cloudUser.name;
+        } else {
+            cloudUser = null;
+            if (session !== "guest") session = null;
+        }
+        cloudReady = true;
+        if (state === "menu") showMenu();
+    });
+}
+
+async function loadCloudUser(user) {
+    const snap = await fb.F.getDoc(fb.F.doc(fb.db, "users", user.uid));
+    const d = snap.exists() ? snap.data() : {};
+    return {
+        uid: user.uid,
+        name: d.name || user.email.split("@")[0],
+        save: Object.assign(emptySave(), { best: d.best || 0, coins: d.coins || 0, games: d.games || 0 })
+    };
+}
+
+function cloudError(e) {
+    const c = (e && e.code) || "";
+    if (c.includes("email-already-in-use")) return T.errTaken;
+    if (c.includes("weak-password")) return T.errPass;
+    if (c.includes("invalid-credential") || c.includes("wrong-password") ||
+        c.includes("user-not-found") || c.includes("invalid-email")) return T.errWrong;
+    console.warn(e);
+    return T.errNet;
+}
+
+// ===== Accounts & saves =====
 const emptySave = () => ({ best: 0, coins: 0, games: 0 });
 let session = null; // null = nobody, "guest", or a username
 
@@ -479,13 +594,20 @@ function currentSave() {
         try { return Object.assign(emptySave(), JSON.parse(safeGet("so_guest_save"))); }
         catch(e) { return emptySave(); }
     }
-    const users = loadUsers();
-    const u = session && users[session.toLowerCase()];
+    if (CLOUD) return cloudUser ? Object.assign({}, cloudUser.save) : emptySave();
+    const u = session && loadUsers()[session.toLowerCase()];
     return u ? Object.assign(emptySave(), u.save) : emptySave();
 }
 
 function writeSave(data) {
     if (session === "guest") { safeSet("so_guest_save", JSON.stringify(data)); return; }
+    if (CLOUD) {
+        if (!cloudUser) return;
+        cloudUser.save = data;
+        fb.F.setDoc(fb.F.doc(fb.db, "users", cloudUser.uid), { name: cloudUser.name, ...data })
+            .catch(e => console.warn("Cloud save failed:", e));
+        return;
+    }
     const users = loadUsers();
     const u = session && users[session.toLowerCase()];
     if (!u) return;
@@ -495,6 +617,7 @@ function writeSave(data) {
 
 function displayName() {
     if (session === "guest") return T.guest;
+    if (CLOUD) return cloudUser ? cloudUser.name : "";
     const u = loadUsers()[(session || "").toLowerCase()];
     return u ? u.name : "";
 }
@@ -505,7 +628,7 @@ function randomSalt() {
     return Array.from(a, b => b.toString(16).padStart(2, "0")).join("");
 }
 
-// Passwords are never stored as plain text: we keep a salted SHA-256 hash
+// Local mode: passwords are kept only as a salted SHA-256 hash
 async function hashPassword(password, salt) {
     const data = new TextEncoder().encode(salt + ":" + password);
     const buf = await crypto.subtle.digest("SHA-256", data);
@@ -514,8 +637,20 @@ async function hashPassword(password, salt) {
 
 async function signUp(name, pass, pass2) {
     if (!/^[A-Za-z0-9_]{3,16}$/.test(name)) return T.errUser;
-    if (pass.length < 4) return T.errPass;
+    if (pass.length < 6) return T.errPass;
     if (pass !== pass2) return T.errMatch;
+
+    if (CLOUD) {
+        if (!fb) return T.errNet;
+        try {
+            const cred = await fb.A.createUserWithEmailAndPassword(fb.auth, name.toLowerCase() + EMAIL_DOMAIN, pass);
+            cloudUser = { uid: cred.user.uid, name, save: emptySave() };
+            await fb.F.setDoc(fb.F.doc(fb.db, "users", cred.user.uid), { name, ...emptySave() });
+            login(name);
+            return null;
+        } catch (e) { return cloudError(e); }
+    }
+
     const users = loadUsers();
     const key = name.toLowerCase();
     if (users[key]) return T.errTaken;
@@ -527,6 +662,15 @@ async function signUp(name, pass, pass2) {
 }
 
 async function signIn(name, pass) {
+    if (CLOUD) {
+        if (!fb) return T.errNet;
+        try {
+            const cred = await fb.A.signInWithEmailAndPassword(fb.auth, name.toLowerCase() + EMAIL_DOMAIN, pass);
+            cloudUser = await loadCloudUser(cred.user);
+            login(cloudUser.name);
+            return null;
+        } catch (e) { return cloudError(e); }
+    }
     const u = loadUsers()[name.toLowerCase()];
     if (!u || (await hashPassword(pass, u.salt)) !== u.hash) return T.errWrong;
     login(u.name);
@@ -535,11 +679,15 @@ async function signIn(name, pass) {
 
 function login(name) {
     session = name;
-    safeSet("so_session", name);
+    safeSet("so_session", name === "guest" || !CLOUD ? name : "");
     showMenu();
 }
 
 function logout() {
+    if (CLOUD && cloudUser && session !== "guest") {
+        cloudUser = null;
+        fb.A.signOut(fb.auth).catch(()=>{});
+    }
     session = null;
     safeSet("so_session", "");
     showMenu();
@@ -552,6 +700,24 @@ function recordGameOver() {
     save.coins = coins;
     if (score > save.best) { save.best = score; newBest = score > 0; }
     writeSave(save);
+    if (newBest && CLOUD && cloudUser && session !== "guest") {
+        fb.F.setDoc(fb.F.doc(fb.db, "leaderboard", cloudUser.uid), { name: cloudUser.name, best: save.best })
+            .catch(e => console.warn("Leaderboard save failed:", e));
+    }
+}
+
+// Top 10 scores: from Firebase when online, otherwise accounts on this browser
+async function fetchLeaderboard() {
+    if (CLOUD && fb) {
+        const q = fb.F.query(fb.F.collection(fb.db, "leaderboard"), fb.F.orderBy("best", "desc"), fb.F.limit(10));
+        const snap = await fb.F.getDocs(q);
+        return snap.docs.map(d => d.data());
+    }
+    return Object.values(loadUsers())
+        .map(u => ({ name: u.name, best: (u.save && u.save.best) || 0 }))
+        .filter(r => r.best > 0)
+        .sort((a, b) => b.best - a.best)
+        .slice(0, 10);
 }
 
 // ===== Menu screens =====
@@ -578,6 +744,13 @@ function showMenu() {
     controlsEl.classList.add("hidden");
 
     const loggedIn = !!session;
+    if (!cloudReady && !loggedIn) {
+        $("menuLoggedOut").classList.add("hidden");
+        $("menuLoggedIn").classList.add("hidden");
+        $("welcomeText").textContent = T.loading;
+        $("statsText").textContent = "";
+        return;
+    }
     $("menuLoggedOut").classList.toggle("hidden", loggedIn);
     $("menuLoggedIn").classList.toggle("hidden", !loggedIn);
 
@@ -612,7 +785,36 @@ function startGame() {
     gameOverBar.classList.add("hidden");
     controlsEl.classList.remove("hidden");
     resetGame();
+    startFrame = frame;
 }
+
+async function showLeaderboard() {
+    state = "lb";
+    menuScreen.classList.add("hidden");
+    $("lbScreen").classList.remove("hidden");
+    $("lbScreen").dir = RTL_LANGS.includes(lang) ? "rtl" : "ltr";
+    const list = $("lbList");
+    list.innerHTML = "<li>" + T.loading + "</li>";
+    try {
+        const rows = await fetchLeaderboard();
+        list.innerHTML = "";
+        if (!rows.length) list.innerHTML = "<li>" + T.noScores + "</li>";
+        rows.forEach((r, i) => {
+            const li = document.createElement("li");
+            if (r.name === displayName()) li.className = "me";
+            const a = document.createElement("span"); a.textContent = (i + 1) + ". " + r.name;
+            const b = document.createElement("span"); b.textContent = r.best;
+            li.append(a, b);
+            list.appendChild(li);
+        });
+    } catch (e) {
+        console.warn(e);
+        list.innerHTML = "<li>" + T.errNet + "</li>";
+    }
+}
+$("btnLb1").onclick = showLeaderboard;
+$("btnLb2").onclick = showLeaderboard;
+$("lbBack").onclick = () => { $("lbScreen").classList.add("hidden"); showMenu(); };
 
 $("btnGuest").onclick = () => { login("guest"); startGame(); };
 $("btnPlay").onclick = startGame;
@@ -668,9 +870,28 @@ document.querySelectorAll(".controls button").forEach(btn=>{
 });
 
 // Tap / click the game to restart after game over
-canvas.addEventListener("pointerdown",()=>{
-    if(state==="playing" && gameOver) startGame();
+function toCanvas(e){
+    const r=canvas.getBoundingClientRect();
+    return { x:(e.clientX-r.left)*W/r.width, y:(e.clientY-r.top)*H/r.height };
+}
+canvas.addEventListener("pointermove",e=>{ Object.assign(mouse,toCanvas(e)); });
+canvas.addEventListener("pointerdown",e=>{
+    if(state!=="playing") return;
+    if(gameOver){ startGame(); return; }
+    Object.assign(mouse,toCanvas(e));
+    mouse.down=true;
+    canvas.setPointerCapture(e.pointerId);
 });
+const stopShoot=()=>{ mouse.down=false; };
+canvas.addEventListener("pointerup",stopShoot);
+canvas.addEventListener("pointercancel",stopShoot);
+
+function shoot(){
+    const sx=player.x+30, sy=player.y-8;
+    const a=Math.atan2(mouse.y-sy, mouse.x-sx);
+    bullets.push({x:sx,y:sy,vx:Math.cos(a)*11,vy:Math.sin(a)*11,life:90});
+    shootCooldown=9;
+}
 
 function distance(a,b) {
     return Math.hypot(a.x-b.x,a.y-b.y);
@@ -1063,8 +1284,19 @@ function update() {
         player.y+=dy/len*player.speed;
     }
 
-    player.x=Math.max(25,Math.min(W-90,player.x));
-    player.y=Math.max(100,Math.min(H-110,player.y));
+    // ship art spans x-10..x+75 and y-12..y+68
+    player.x=Math.max(10,Math.min(W-76,player.x));
+    player.y=Math.max(14,Math.min(H-74,player.y));
+
+    // Shooting
+    if(shootCooldown>0) shootCooldown--;
+    if((mouse.down||keys[" "]) && shootCooldown===0) shoot();
+
+    bullets.forEach(b=>{ b.x+=b.vx; b.y+=b.vy; b.life--; });
+    bullets=bullets.filter(b=>b.life>0 && b.x>-20 && b.x<W+20 && b.y>-20 && b.y<H+20);
+
+    floaters.forEach(f=>{ f.y-=.8; f.life--; });
+    floaters=floaters.filter(f=>f.life>0);
 
     if(invincible>0) invincible--;
 
@@ -1086,6 +1318,7 @@ function update() {
             }
 
             explosion(c.x,c.y,"#d9a2ff",20);
+            floaters.push({x:c.x,y:c.y,text:T.points,color:"#ffffff",life:45});
             crystals.splice(i,1);
             crystals.push({
                 x:W+rand(30,250),
@@ -1102,9 +1335,27 @@ function update() {
     });
 
     // Enemies
+    const chase=Math.min(2.6, .55+level*.12);   // aliens get faster every level
     enemies.forEach((e,i)=>{
-        e.x+=Math.sin(frame*.018+e.phase)*e.speed;
-        e.y+=Math.cos(frame*.025+e.phase)*.6;
+        // steer toward the player, with a little wobble so they don't stack
+        const tx=player.x+30-e.x, ty=player.y+30-e.y;
+        const d=Math.hypot(tx,ty)||1;
+        const sp=chase*(.7+e.speed*.4);
+        e.x+=tx/d*sp+Math.sin(frame*.03+e.phase)*.6;
+        e.y+=ty/d*sp+Math.cos(frame*.035+e.phase)*.6;
+
+        // hit by a bullet?
+        for(const b of bullets){
+            if(b.life>0 && Math.hypot(b.x-e.x,b.y-(e.y+5))<32){
+                b.life=0;
+                score+=25;
+                coins+=2;
+                explosion(e.x,e.y,["#00cfff","#9ee600","#ff456e"][e.type],26);
+                floaters.push({x:e.x,y:e.y,text:"+25",color:"#ffe22d",life:45});
+                const p=farSpot(); e.x=p.x; e.y=p.y;
+                break;
+            }
+        }
 
         if(distance(
             {x:player.x+30,y:player.y+30},
@@ -1117,8 +1368,7 @@ function update() {
 
             explosion(player.x+30,player.y+30,"#ff398b",30);
 
-            e.x=rand(100,W-100);
-            e.y=rand(60,260);
+            const p=farSpot(); e.x=p.x; e.y=p.y;
 
             if(lives<=0){
                 gameOver=true;
@@ -1129,11 +1379,9 @@ function update() {
     });
 
     // Occasionally spawn more enemies
-    if(frame%600===0){
+    if(frame%600===0 && enemies.length<Math.min(10,3+level)){
         spawnEnemy();
     }
-
-    updateParticles();
 
     if(shake>0) shake*=.8;
 }
@@ -1160,12 +1408,45 @@ function draw() {
 
     updateParticles();
 
-    // Floating score message
-    if(frame%200<60){
-        ctx.fillStyle="#ffffff";
-        ctx.font="bold 22px monospace";
+    // Bullets
+    bullets.forEach(b=>{
+        glow(b.x,b.y,14,"#7dfcff");
+        rect(b.x-2,b.y-2,5,5,"#ffffff");
+    });
+
+    // Floating "+points" texts
+    ctx.textAlign="center";
+    ctx.font="bold 20px monospace";
+    floaters.forEach(f=>{
+        ctx.globalAlpha=Math.min(1,f.life/20);
+        ctx.fillStyle=f.color;
+        text(f.text,f.x,f.y,160);
+    });
+    ctx.globalAlpha=1;
+    ctx.textAlign="left";
+
+    // Crosshair
+    if(!gameOver){
+        ctx.strokeStyle="#7dfcff";
+        ctx.lineWidth=2;
+        ctx.beginPath();
+        ctx.arc(mouse.x,mouse.y,10,0,Math.PI*2);
+        ctx.moveTo(mouse.x-16,mouse.y); ctx.lineTo(mouse.x-6,mouse.y);
+        ctx.moveTo(mouse.x+6,mouse.y);  ctx.lineTo(mouse.x+16,mouse.y);
+        ctx.moveTo(mouse.x,mouse.y-16); ctx.lineTo(mouse.x,mouse.y-6);
+        ctx.moveTo(mouse.x,mouse.y+6);  ctx.lineTo(mouse.x,mouse.y+16);
+        ctx.stroke();
+    }
+
+    // Hint for the first few seconds
+    if(frame-startFrame<240 && !gameOver){
+        ctx.globalAlpha=Math.min(1,(240-(frame-startFrame))/60);
+        ctx.fillStyle="#ffe22d";
+        ctx.font="bold 18px monospace";
+        ctx.textAlign="center";
+        text(T.aimHint,W/2,H-22,W-340);
         ctx.textAlign="left";
-        text(T.points,445,236,140);
+        ctx.globalAlpha=1;
     }
 
     drawHUD();
@@ -1219,7 +1500,8 @@ function gameLoop(){
 
 createStars();
 session = safeGet("so_session") || null;
-if (session && session !== "guest" && !loadUsers()[session.toLowerCase()]) session = null;
+if (session && session !== "guest" && (CLOUD || !loadUsers()[session.toLowerCase()])) session = null;
+if (CLOUD) initCloud().catch(e => { console.warn("Firebase failed to load:", e); cloudReady = true; showMenu(); });
 setLanguage(safeGet("so_lang") || "en");
 resetGame();
 showMenu();
