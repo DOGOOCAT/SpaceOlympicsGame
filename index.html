@@ -76,6 +76,68 @@ canvas {
     font-family: monospace;
     font-size: 15px;
 }
+
+.overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    color: white;
+    text-align: center;
+    background: rgba(9,3,30,.55);
+    border: 2px solid transparent;
+}
+.hidden { display: none !important; }
+
+.title {
+    font-size: clamp(26px, 6vw, 56px);
+    font-weight: bold;
+    color: #ff60bc;
+    text-shadow: 0 0 20px #ff258e;
+    letter-spacing: 2px;
+}
+.subtitle { color: #ffe22d; font-size: clamp(13px, 2.2vw, 18px); }
+
+.menu-btn {
+    min-width: 230px;
+    padding: 11px 18px;
+    border: 2px solid #a86cff;
+    background: #35105ecc;
+    color: white;
+    border-radius: 12px;
+    font-family: monospace;
+    font-size: 18px;
+    font-weight: bold;
+    cursor: pointer;
+}
+.menu-btn:hover { background: #5a1fa0; box-shadow: 0 0 14px #a86cff; }
+.menu-btn.primary { background: #c2187bdd; border-color: #ff7fd0; }
+.menu-btn.small { min-width: 0; font-size: 14px; padding: 7px 12px; }
+
+.auth-form { display: flex; flex-direction: column; gap: 9px; align-items: center; }
+.auth-form input {
+    width: 230px;
+    padding: 10px;
+    border: 2px solid #a86cff;
+    background: #120a33;
+    color: white;
+    border-radius: 10px;
+    font-family: monospace;
+    font-size: 16px;
+}
+.msg { min-height: 18px; color: #ff8bb5; font-size: 14px; }
+.stats { color: #bfe9ff; font-size: 15px; line-height: 1.5; }
+.row { display: flex; gap: 8px; }
+
+.game-over-bar {
+    position: absolute;
+    left: 50%;
+    bottom: 22%;
+    transform: translateX(-50%);
+}
 </style>
 </head>
 
@@ -89,6 +151,43 @@ canvas {
     <button data-key="ArrowUp">▲</button>
     <button data-key="ArrowDown">▼</button>
     <button data-key="ArrowRight">▶</button>
+</div>
+
+<!-- Main menu -->
+<div id="menuScreen" class="overlay">
+    <div class="title">SPACE OLYMPICS 🇮🇱</div>
+    <div id="welcomeText" class="subtitle"></div>
+    <div id="statsText" class="stats"></div>
+
+    <div id="menuLoggedOut" class="auth-form">
+        <button class="menu-btn primary" id="btnGuest" data-i18n="playGuest"></button>
+        <button class="menu-btn" id="btnShowSignIn" data-i18n="signIn"></button>
+        <button class="menu-btn" id="btnShowSignUp" data-i18n="signUp"></button>
+    </div>
+
+    <div id="menuLoggedIn" class="auth-form hidden">
+        <button class="menu-btn primary" id="btnPlay" data-i18n="play"></button>
+        <button class="menu-btn" id="btnLogout" data-i18n="logout"></button>
+    </div>
+</div>
+
+<!-- Sign in / Sign up -->
+<div id="authScreen" class="overlay hidden">
+    <div class="title" id="authTitle"></div>
+    <form id="authForm" class="auth-form" autocomplete="off">
+        <input id="authUser" maxlength="16" data-i18n-ph="username">
+        <input id="authPass" type="password" maxlength="64" data-i18n-ph="password">
+        <input id="authPass2" type="password" maxlength="64" data-i18n-ph="confirmPassword">
+        <div id="authMsg" class="msg"></div>
+        <button class="menu-btn primary" type="submit" id="authSubmit"></button>
+        <button class="menu-btn small" type="button" id="authBack" data-i18n="back"></button>
+    </form>
+</div>
+
+<!-- Game over buttons -->
+<div id="gameOverBar" class="game-over-bar row hidden">
+    <button class="menu-btn small" id="btnAgain" data-i18n="again"></button>
+    <button class="menu-btn small" id="btnMenu" data-i18n="mainMenu"></button>
 </div>
 
 <div class="lang-box">
@@ -122,7 +221,9 @@ let stars = [];
 let comets = [];
 
 let score = 0;
-let coins = 999;
+let coins = 0;
+let state = "menu";   // "menu" | "auth" | "playing"
+let newBest = false;
 let lives = 3;
 let level = 2;
 let progress = 0;
@@ -140,7 +241,28 @@ const STRINGS_EN = {
     points: "+10pt",
     gameOver: "GAME OVER",
     finalScore: "FINAL SCORE:",
-    playAgain: "PRESS R OR TAP TO PLAY AGAIN"
+    playAgain: "PRESS R OR TAP TO PLAY AGAIN",
+    newBest: "NEW BEST!",
+    playGuest: "Play as Guest",
+    play: "Play",
+    signIn: "Sign In",
+    signUp: "Sign Up",
+    logout: "Log Out",
+    back: "Back",
+    again: "Play Again",
+    mainMenu: "Main Menu",
+    username: "Username",
+    password: "Password",
+    confirmPassword: "Confirm password",
+    welcome: "Welcome",
+    guest: "Guest",
+    bestScore: "Best score",
+    gamesPlayed: "Games played",
+    errUser: "Username: 3-16 letters, numbers or _",
+    errPass: "Password must be at least 4 characters",
+    errMatch: "Passwords do not match",
+    errTaken: "That username is taken",
+    errWrong: "Wrong username or password"
 };
 
 // Built-in (hand-written) translations: instant, no API call
@@ -152,7 +274,28 @@ const BUILTIN = {
         points: "+10 נק׳",
         gameOver: "המשחק נגמר",
         finalScore: "ניקוד סופי:",
-        playAgain: "לחצו R או געו במסך כדי לשחק שוב"
+        playAgain: "לחצו R או געו במסך כדי לשחק שוב",
+        newBest: "שיא חדש!",
+        playGuest: "שחק כאורח",
+        play: "שחק",
+        signIn: "התחברות",
+        signUp: "הרשמה",
+        logout: "התנתקות",
+        back: "חזרה",
+        again: "שחק שוב",
+        mainMenu: "תפריט ראשי",
+        username: "שם משתמש",
+        password: "סיסמה",
+        confirmPassword: "אימות סיסמה",
+        welcome: "ברוך הבא",
+        guest: "אורח",
+        bestScore: "שיא",
+        gamesPlayed: "משחקים",
+        errUser: "שם משתמש: 3-16 אותיות באנגלית, מספרים או _",
+        errPass: "הסיסמה חייבת להכיל לפחות 4 תווים",
+        errMatch: "הסיסמאות לא תואמות",
+        errTaken: "שם המשתמש תפוס",
+        errWrong: "שם משתמש או סיסמה שגויים"
     }
 };
 
@@ -165,7 +308,7 @@ function safeSet(k,v){ try { localStorage.setItem(k,v); } catch(e){} }
 
 // Other languages come from the free MyMemory translation API (no key needed)
 async function translateViaApi(target) {
-    const cached = safeGet("so_lang_" + target);
+    const cached = safeGet("so_lang_v2_" + target);
     if (cached) { try { return JSON.parse(cached); } catch(e){} }
 
     const keysList = Object.keys(STRINGS_EN);
@@ -183,7 +326,7 @@ async function translateViaApi(target) {
 
     const out = Object.fromEntries(results);
     out.points = "+10 " + out.points;
-    safeSet("so_lang_" + target, JSON.stringify(out));
+    safeSet("so_lang_v2_" + target, JSON.stringify(out));
     return out;
 }
 
@@ -197,6 +340,7 @@ async function setLanguage(code) {
     if (BUILTIN[code]) {
         lang = code; T = BUILTIN[code];
         langStatus.textContent = "";
+        applyMenuText();
         return;
     }
 
@@ -206,17 +350,18 @@ async function setLanguage(code) {
         if (langSelect.value !== code) return; // user switched again meanwhile
         lang = code; T = strings;
         langStatus.textContent = "";
+        applyMenuText();
     } catch (err) {
         console.warn("Translation failed:", err);
         lang = "en"; T = STRINGS_EN;
         langSelect.value = "en";
+        applyMenuText();
         langStatus.textContent = "⚠ offline";
         setTimeout(() => langStatus.textContent = "", 2500);
     }
 }
 
 langSelect.addEventListener("change", () => setLanguage(langSelect.value));
-setLanguage(safeGet("so_lang") || "en");
 
 // Draw text with correct direction for Hebrew/Arabic; maxW stops long translations overflowing
 function text(str, x, y, maxW) {
@@ -281,7 +426,8 @@ function createPlayer() {
 function resetGame() {
     score=0;
     lives=3;
-    coins=999;
+    coins=currentSave().coins;
+    newBest=false;
     level=2;
     progress=0;
     gameOver=false;
@@ -319,13 +465,183 @@ function spawnEnemy() {
     });
 }
 
+// ===== Accounts & saves (stored in this browser's localStorage) =====
+const emptySave = () => ({ best: 0, coins: 0, games: 0 });
+let session = null; // null = nobody, "guest", or a username
+
+function loadUsers() {
+    try { return JSON.parse(safeGet("so_users")) || {}; } catch(e) { return {}; }
+}
+function saveUsers(u) { safeSet("so_users", JSON.stringify(u)); }
+
+function currentSave() {
+    if (session === "guest") {
+        try { return Object.assign(emptySave(), JSON.parse(safeGet("so_guest_save"))); }
+        catch(e) { return emptySave(); }
+    }
+    const users = loadUsers();
+    const u = session && users[session.toLowerCase()];
+    return u ? Object.assign(emptySave(), u.save) : emptySave();
+}
+
+function writeSave(data) {
+    if (session === "guest") { safeSet("so_guest_save", JSON.stringify(data)); return; }
+    const users = loadUsers();
+    const u = session && users[session.toLowerCase()];
+    if (!u) return;
+    u.save = data;
+    saveUsers(users);
+}
+
+function displayName() {
+    if (session === "guest") return T.guest;
+    const u = loadUsers()[(session || "").toLowerCase()];
+    return u ? u.name : "";
+}
+
+function randomSalt() {
+    const a = new Uint8Array(16);
+    crypto.getRandomValues(a);
+    return Array.from(a, b => b.toString(16).padStart(2, "0")).join("");
+}
+
+// Passwords are never stored as plain text: we keep a salted SHA-256 hash
+async function hashPassword(password, salt) {
+    const data = new TextEncoder().encode(salt + ":" + password);
+    const buf = await crypto.subtle.digest("SHA-256", data);
+    return Array.from(new Uint8Array(buf), b => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function signUp(name, pass, pass2) {
+    if (!/^[A-Za-z0-9_]{3,16}$/.test(name)) return T.errUser;
+    if (pass.length < 4) return T.errPass;
+    if (pass !== pass2) return T.errMatch;
+    const users = loadUsers();
+    const key = name.toLowerCase();
+    if (users[key]) return T.errTaken;
+    const salt = randomSalt();
+    users[key] = { name, salt, hash: await hashPassword(pass, salt), save: emptySave() };
+    saveUsers(users);
+    login(name);
+    return null;
+}
+
+async function signIn(name, pass) {
+    const u = loadUsers()[name.toLowerCase()];
+    if (!u || (await hashPassword(pass, u.salt)) !== u.hash) return T.errWrong;
+    login(u.name);
+    return null;
+}
+
+function login(name) {
+    session = name;
+    safeSet("so_session", name);
+    showMenu();
+}
+
+function logout() {
+    session = null;
+    safeSet("so_session", "");
+    showMenu();
+}
+
+// Called once when a run ends
+function recordGameOver() {
+    const save = currentSave();
+    save.games++;
+    save.coins = coins;
+    if (score > save.best) { save.best = score; newBest = score > 0; }
+    writeSave(save);
+}
+
+// ===== Menu screens =====
+const $ = id => document.getElementById(id);
+const menuScreen = $("menuScreen"), authScreen = $("authScreen");
+const gameOverBar = $("gameOverBar"), controlsEl = document.querySelector(".controls");
+let authMode = "signin";
+
+function applyMenuText() {
+    document.querySelectorAll("[data-i18n]").forEach(el => el.textContent = T[el.dataset.i18n]);
+    document.querySelectorAll("[data-i18n-ph]").forEach(el => el.placeholder = T[el.dataset.i18nPh]);
+    const rtl = RTL_LANGS.includes(lang) ? "rtl" : "ltr";
+    menuScreen.dir = authScreen.dir = rtl;
+    $("authTitle").textContent = authMode === "signin" ? T.signIn : T.signUp;
+    $("authSubmit").textContent = authMode === "signin" ? T.signIn : T.signUp;
+    if (state === "menu") showMenu();
+}
+
+function showMenu() {
+    state = "menu";
+    menuScreen.classList.remove("hidden");
+    authScreen.classList.add("hidden");
+    gameOverBar.classList.add("hidden");
+    controlsEl.classList.add("hidden");
+
+    const loggedIn = !!session;
+    $("menuLoggedOut").classList.toggle("hidden", loggedIn);
+    $("menuLoggedIn").classList.toggle("hidden", !loggedIn);
+
+    if (loggedIn) {
+        const s = currentSave();
+        $("welcomeText").textContent = T.welcome + ", " + displayName() + "!";
+        $("statsText").textContent = T.bestScore + ": " + s.best + " · " +
+            T.gamesPlayed + ": " + s.games + " · 🪙 " + s.coins;
+        $("btnLogout").textContent = session === "guest" ? T.back : T.logout;
+    } else {
+        $("welcomeText").textContent = "";
+        $("statsText").textContent = "";
+    }
+}
+
+function showAuth(mode) {
+    authMode = mode;
+    state = "auth";
+    menuScreen.classList.add("hidden");
+    authScreen.classList.remove("hidden");
+    $("authPass2").classList.toggle("hidden", mode !== "signup");
+    $("authMsg").textContent = "";
+    $("authPass").value = $("authPass2").value = "";
+    applyMenuText();
+    $("authUser").focus();
+}
+
+function startGame() {
+    state = "playing";
+    menuScreen.classList.add("hidden");
+    authScreen.classList.add("hidden");
+    gameOverBar.classList.add("hidden");
+    controlsEl.classList.remove("hidden");
+    resetGame();
+}
+
+$("btnGuest").onclick = () => { login("guest"); startGame(); };
+$("btnPlay").onclick = startGame;
+$("btnLogout").onclick = logout;
+$("btnShowSignIn").onclick = () => showAuth("signin");
+$("btnShowSignUp").onclick = () => showAuth("signup");
+$("authBack").onclick = showMenu;
+$("btnAgain").onclick = startGame;
+$("btnMenu").onclick = showMenu;
+
+$("authForm").addEventListener("submit", async e => {
+    e.preventDefault();
+    const name = $("authUser").value.trim(), pass = $("authPass").value;
+    const err = authMode === "signup"
+        ? await signUp(name, pass, $("authPass2").value)
+        : await signIn(name, pass);
+    if (err) $("authMsg").textContent = err;
+});
+
 // Keyboard
 document.addEventListener("keydown",e=>{
+    if(state!=="playing") return; // let menu inputs get normal typing
     keys[e.key.toLowerCase()]=true;
     if(["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"," "].includes(e.key))
         e.preventDefault();
 
-    if(gameOver && e.key.toLowerCase()==="r") resetGame();
+    if(gameOver && e.key.toLowerCase()==="r") startGame();
+    if(gameOver && e.key.toLowerCase()==="m") showMenu();
+    if(e.key==="Escape"){ if(!gameOver){ gameOver=true; recordGameOver(); } showMenu(); }
 });
 
 document.addEventListener("keyup",e=>{
@@ -353,7 +669,7 @@ document.querySelectorAll(".controls button").forEach(btn=>{
 
 // Tap / click the game to restart after game over
 canvas.addEventListener("pointerdown",()=>{
-    if(gameOver) resetGame();
+    if(state==="playing" && gameOver) startGame();
 });
 
 function distance(a,b) {
@@ -731,7 +1047,7 @@ function updateParticles() {
 function update() {
     frame++;
 
-    if(gameOver) return;
+    if(state!=="playing" || gameOver) return;
 
     // Player movement
     let dx=0,dy=0;
@@ -804,7 +1120,11 @@ function update() {
             e.x=rand(100,W-100);
             e.y=rand(60,260);
 
-            if(lives<=0) gameOver=true;
+            if(lives<=0){
+                gameOver=true;
+                recordGameOver();
+                gameOverBar.classList.remove("hidden");
+            }
         }
     });
 
@@ -827,6 +1147,11 @@ function draw() {
     }
 
     drawBackground();
+
+    if(state!=="playing"){
+        ctx.restore();
+        return;
+    }
 
     crystals.forEach(drawCrystal);
     enemies.forEach(drawAlien);
@@ -870,6 +1195,12 @@ function draw() {
         ctx.font="bold 25px monospace";
         text(T.finalScore+" "+score,W/2,230,W-80);
 
+        if(newBest){
+            ctx.fillStyle="#00e5ff";
+            ctx.font="bold 22px monospace";
+            text(T.newBest,W/2,258,W-80);
+        }
+
         ctx.fillStyle="#ffe22d";
         ctx.font="bold 20px monospace";
         text(T.playAgain,W/2,290,W-80);
@@ -887,7 +1218,11 @@ function gameLoop(){
 }
 
 createStars();
+session = safeGet("so_session") || null;
+if (session && session !== "guest" && !loadUsers()[session.toLowerCase()]) session = null;
+setLanguage(safeGet("so_lang") || "en");
 resetGame();
+showMenu();
 gameLoop();
 
 </script>
