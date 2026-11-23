@@ -400,7 +400,7 @@ async function setLanguage(code) {
     }
 }
 
-langSelect.addEventListener("change", () => setLanguage(langSelect.value));
+langSelect.addEventListener("change", () => { setLanguage(langSelect.value); langSelect.blur(); });
 
 // Draw text with correct direction for Hebrew/Arabic; maxW stops long translations overflowing
 function text(str, x, y, maxW) {
@@ -784,6 +784,8 @@ function startGame() {
     controlsEl.classList.remove("hidden");
     resetGame();
     startFrame = frame;
+    releaseAll();
+    if (document.activeElement) document.activeElement.blur();
 }
 
 async function showLeaderboard() {
@@ -833,20 +835,37 @@ $("authForm").addEventListener("submit", async e => {
 });
 
 // Keyboard
+// Use physical key codes so WASD/R/M/Space work on a Hebrew keyboard layout too
+const CODE_MAP={KeyW:"w",KeyA:"a",KeyS:"s",KeyD:"d",KeyR:"r",KeyM:"m",Space:" ",
+    ArrowUp:"arrowup",ArrowDown:"arrowdown",ArrowLeft:"arrowleft",ArrowRight:"arrowright"};
+const keyName=e=>CODE_MAP[e.code]||e.key.toLowerCase();
+
 document.addEventListener("keydown",e=>{
     if(state!=="playing") return; // let menu inputs get normal typing
-    keys[e.key.toLowerCase()]=true;
-    if(["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"," "].includes(e.key))
+    const k=keyName(e);
+    // stop Space/arrows from pressing a focused button, opening the language menu or scrolling
+    if(k in {" ":1,arrowup:1,arrowdown:1,arrowleft:1,arrowright:1}){
         e.preventDefault();
+        if(document.activeElement && document.activeElement!==document.body) document.activeElement.blur();
+    }
+    keys[k]=true;
 
-    if(gameOver && e.key.toLowerCase()==="r") startGame();
-    if(gameOver && e.key.toLowerCase()==="m") showMenu();
+    if(gameOver && k==="r") startGame();
+    if(gameOver && k==="m") showMenu();
     if(e.key==="Escape"){ if(!gameOver){ gameOver=true; recordGameOver(); } showMenu(); }
 });
 
 document.addEventListener("keyup",e=>{
-    keys[e.key.toLowerCase()]=false;
+    keys[keyName(e)]=false;
 });
+
+// If the window loses focus (right-click menu, alt-tab), release every key so none get stuck
+function releaseAll(){ for(const k in keys) keys[k]=false; mouse.down=false; }
+window.addEventListener("blur",releaseAll);
+document.addEventListener("visibilitychange",releaseAll);
+
+// No right-click menu inside the game; right-click shoots like left-click
+document.querySelector(".game-wrap").addEventListener("contextmenu",e=>e.preventDefault());
 
 // Mobile controls
 document.querySelectorAll(".controls button").forEach(btn=>{
