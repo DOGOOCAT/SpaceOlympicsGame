@@ -529,7 +529,6 @@ const FIREBASE_CONFIG = {
     appId: "1:681680611118:web:b2b1c5b4216c089927fcbf"
 };
 const CLOUD = !!FIREBASE_CONFIG.apiKey;
-const FB_VER = "10.12.2";
 const EMAIL_DOMAIN = "@spaceolympics.game"; // fake email made from the username, never shown
 
 let fb = null;          // { auth, db, A (auth functions), F (firestore functions) }
@@ -537,13 +536,10 @@ let cloudUser = null;   // { uid, name, save }
 let cloudReady = !CLOUD;
 
 async function initCloud() {
-    const base = "https://www.gstatic.com/firebasejs/" + FB_VER + "/";
-    const [appMod, A, F] = await Promise.all([
-        import(base + "firebase-app.js"),
-        import(base + "firebase-auth.js"),
-        import(base + "firebase-firestore.js")
-    ]);
-    const app = appMod.initializeApp(FIREBASE_CONFIG);
+    // firebase.js is Firebase bundled into this repo (school networks may block Google's CDN)
+    const M = await import("./firebase.js");
+    const A = M, F = M;
+    const app = M.initializeApp(FIREBASE_CONFIG);
     fb = { auth: A.getAuth(app), db: F.getFirestore(app), A, F };
 
     A.onAuthStateChanged(fb.auth, async user => {
