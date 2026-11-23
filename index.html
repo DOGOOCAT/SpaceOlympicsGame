@@ -147,6 +147,36 @@ canvas {
 .lb-list li { display: flex; justify-content: space-between; gap: 20px; padding: 3px 0; }
 .lb-list li.me { color: #ffe22d; font-weight: bold; }
 
+.shop-wrap {
+    width: min(94%, 860px);
+    max-height: 64%;
+    overflow-y: auto;
+    padding: 4px;
+}
+.shop-head { color: #fff000; font-size: 20px; font-weight: bold; }
+.shop-section { color: #d9c4ff; font-size: 15px; margin: 6px 0 4px; text-align: start; }
+.shop-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 8px;
+}
+.card {
+    background: #120a33dd;
+    border: 2px solid #5a2fa0;
+    border-radius: 12px;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 13px;
+}
+.card b { font-size: 15px; }
+.card .desc { color: #bfb3e6; }
+.pips { color: #ffe22d; letter-spacing: 2px; }
+.swatch { height: 14px; border-radius: 6px; }
+.card .menu-btn.small { min-width: 0; padding: 5px 8px; font-size: 13px; }
+.card .menu-btn.owned { background: #1d6b3acc; border-color: #4fe38a; }
+
 .game-over-bar {
     position: absolute;
     left: 50%;
@@ -183,9 +213,24 @@ canvas {
 
     <div id="menuLoggedIn" class="auth-form hidden">
         <button class="menu-btn primary" id="btnPlay" data-i18n="play"></button>
+        <button class="menu-btn" id="btnShop" data-i18n="shop"></button>
         <button class="menu-btn" id="btnLb2" data-i18n="leaderboard"></button>
         <button class="menu-btn" id="btnLogout" data-i18n="logout"></button>
     </div>
+</div>
+
+<!-- Shop -->
+<div id="shopScreen" class="overlay hidden">
+    <div class="title" data-i18n="shop"></div>
+    <div class="shop-head" id="shopCoins"></div>
+    <div id="shopMsg" class="msg"></div>
+    <div class="shop-wrap">
+        <div class="shop-section" data-i18n="upgrades"></div>
+        <div class="shop-grid" id="upgradeGrid"></div>
+        <div class="shop-section" data-i18n="skins"></div>
+        <div class="shop-grid" id="skinGrid"></div>
+    </div>
+    <button class="menu-btn small" id="shopBack" data-i18n="back"></button>
 </div>
 
 <!-- Leaderboard -->
@@ -243,6 +288,26 @@ let enemies = [];
 let particles = [];
 let stars = [];
 let comets = [];
+// ===== Shop data =====
+const UPGRADES = [
+    { id: "fireRate",  costs: [25, 50, 90, 140, 200] },
+    { id: "multiShot", costs: [150, 350] },
+    { id: "speed",     costs: [30, 60, 110, 170] },
+    { id: "maxLives",  costs: [120, 300] },
+    { id: "magnet",    costs: [40, 90, 160] },
+    { id: "coinBoost", costs: [100, 250] }
+];
+const SKINS = {
+    default: { price: 0,   wing: "#a9caff", body: "#b3d9ff", stripe: "#667fda", cockpit: "#ff4c9b" },
+    gold:    { price: 120, wing: "#ffd36b", body: "#ffe9a8", stripe: "#c98a1b", cockpit: "#ff6a00" },
+    neon:    { price: 180, wing: "#6dffb0", body: "#b8ffd9", stripe: "#11a35a", cockpit: "#00e1ff" },
+    crimson: { price: 250, wing: "#ff7a8f", body: "#ffc2cc", stripe: "#b3123a", cockpit: "#ffe22d" },
+    shadow:  { price: 400, wing: "#5a4d8a", body: "#8a7fc0", stripe: "#2a1f55", cockpit: "#ff2dd4" }
+};
+let up = {};              // upgrade levels for the current run
+let skin = SKINS.default; // colors for the current run
+const U = k => up[k] || 0;
+
 let bullets = [];
 let floaters = [];
 let shootCooldown = 0;
@@ -294,6 +359,21 @@ const STRINGS_EN = {
     leaderboard: "🏆 Leaderboard",
     noScores: "No scores yet",
     aimHint: "Aim with the mouse, click or SPACE to shoot",
+    shop: "🛒 Shop",
+    upgrades: "Upgrades",
+    skins: "Ship Skins",
+    buy: "Buy",
+    max: "MAX",
+    equip: "Equip",
+    equipped: "Equipped ✓",
+    notEnough: "Not enough coins",
+    up_fireRate: "Rapid Fire", up_fireRate_d: "Shoot faster",
+    up_multiShot: "Spread Shot", up_multiShot_d: "More bullets per shot",
+    up_speed: "Turbo Engine", up_speed_d: "Fly faster",
+    up_maxLives: "Extra Heart", up_maxLives_d: "Start with more lives",
+    up_magnet: "Crystal Magnet", up_magnet_d: "Pulls crystals to you",
+    up_coinBoost: "Coin Boost", up_coinBoost_d: "More coins per crystal",
+    skin_default: "Classic", skin_gold: "Gold", skin_neon: "Neon", skin_crimson: "Crimson", skin_shadow: "Shadow",
     errMatch: "Passwords do not match",
     errTaken: "That username is taken",
     errWrong: "Wrong username or password"
@@ -332,6 +412,21 @@ const BUILTIN = {
         leaderboard: "🏆 טבלת שיאים",
         noScores: "אין עדיין שיאים",
         aimHint: "כוונו עם העכבר, לחצו או רווח כדי לירות",
+        shop: "🛒 חנות",
+        upgrades: "שדרוגים",
+        skins: "סקינים לחללית",
+        buy: "קנה",
+        max: "מקסימום",
+        equip: "בחר",
+        equipped: "נבחר ✓",
+        notEnough: "אין מספיק מטבעות",
+        up_fireRate: "ירי מהיר", up_fireRate_d: "יורים מהר יותר",
+        up_multiShot: "ירי מפוצל", up_multiShot_d: "יותר כדורים בכל ירייה",
+        up_speed: "מנוע טורבו", up_speed_d: "טסים מהר יותר",
+        up_maxLives: "לב נוסף", up_maxLives_d: "מתחילים עם יותר חיים",
+        up_magnet: "מגנט קריסטלים", up_magnet_d: "מושך קריסטלים אליך",
+        up_coinBoost: "בוסט מטבעות", up_coinBoost_d: "יותר מטבעות לכל קריסטל",
+        skin_default: "קלאסי", skin_gold: "זהב", skin_neon: "ניאון", skin_crimson: "ארגמן", skin_shadow: "צל",
         errMatch: "הסיסמאות לא תואמות",
         errTaken: "שם המשתמש תפוס",
         errWrong: "שם משתמש או סיסמה שגויים"
@@ -347,7 +442,7 @@ function safeSet(k,v){ try { localStorage.setItem(k,v); } catch(e){} }
 
 // Other languages come from the free MyMemory translation API (no key needed)
 async function translateViaApi(target) {
-    const cached = safeGet("so_lang_v4_" + target);
+    const cached = safeGet("so_lang_v5_" + target);
     if (cached) { try { return JSON.parse(cached); } catch(e){} }
 
     const keysList = Object.keys(STRINGS_EN);
@@ -365,7 +460,7 @@ async function translateViaApi(target) {
 
     const out = Object.fromEntries(results);
     out.points = "+10 " + out.points;
-    safeSet("so_lang_v4_" + target, JSON.stringify(out));
+    safeSet("so_lang_v5_" + target, JSON.stringify(out));
     return out;
 }
 
@@ -465,7 +560,10 @@ function createPlayer() {
 function resetGame() {
     score=0;
     lives=3;
-    coins=currentSave().coins;
+    const sv=currentSave();
+    coins=sv.coins;
+    up=Object.assign({},sv.upgrades);
+    skin=SKINS[sv.skin]||SKINS.default;
     newBest=false;
     level=2;
     progress=0;
@@ -474,6 +572,8 @@ function resetGame() {
     invincible=0;
 
     player=createPlayer();
+    player.speed=4+U("speed")*.6;
+    lives=3+U("maxLives");
     crystals=[];
     enemies=[];
     particles=[];
@@ -564,7 +664,10 @@ async function loadCloudUser(user) {
     return {
         uid: user.uid,
         name: d.name || user.email.split("@")[0],
-        save: Object.assign(emptySave(), { best: d.best || 0, coins: d.coins || 0, games: d.games || 0 })
+        save: Object.assign(emptySave(), {
+            best: d.best || 0, coins: d.coins || 0, games: d.games || 0,
+            upgrades: d.upgrades || {}, skins: d.skins || ["default"], skin: d.skin || "default"
+        })
     };
 }
 
@@ -579,7 +682,7 @@ function cloudError(e) {
 }
 
 // ===== Accounts & saves =====
-const emptySave = () => ({ best: 0, coins: 0, games: 0 });
+const emptySave = () => ({ best: 0, coins: 0, games: 0, upgrades: {}, skins: ["default"], skin: "default" });
 let session = null; // null = nobody, "guest", or a username
 
 function loadUsers() {
@@ -732,6 +835,7 @@ function applyMenuText() {
     $("authTitle").textContent = authMode === "signin" ? T.signIn : T.signUp;
     $("authSubmit").textContent = authMode === "signin" ? T.signIn : T.signUp;
     if (state === "menu") showMenu();
+    if (state === "shop") { $("shopScreen").dir = rtl; renderShop(); }
 }
 
 function showMenu() {
@@ -812,6 +916,75 @@ async function showLeaderboard() {
         list.innerHTML = "<li>" + T.errNet + "</li>";
     }
 }
+function showShop() {
+    state = "shop";
+    menuScreen.classList.add("hidden");
+    $("shopScreen").classList.remove("hidden");
+    $("shopScreen").dir = RTL_LANGS.includes(lang) ? "rtl" : "ltr";
+    $("shopMsg").textContent = "";
+    renderShop();
+}
+
+function shopButton(label, cls, onClick, disabled) {
+    const b = document.createElement("button");
+    b.className = "menu-btn small " + (cls || "");
+    b.textContent = label;
+    b.disabled = !!disabled;
+    b.onclick = onClick;
+    return b;
+}
+
+function buy(cost, apply) {
+    const sv = currentSave();
+    if (sv.coins < cost) { $("shopMsg").textContent = T.notEnough; return; }
+    sv.coins -= cost;
+    apply(sv);
+    writeSave(sv);
+    $("shopMsg").textContent = "";
+    renderShop();
+}
+
+function renderShop() {
+    const sv = currentSave();
+    $("shopCoins").textContent = "🪙 " + sv.coins;
+
+    const ug = $("upgradeGrid"); ug.innerHTML = "";
+    UPGRADES.forEach(u => {
+        const lvl = sv.upgrades[u.id] || 0, max = u.costs.length;
+        const card = document.createElement("div"); card.className = "card";
+        const name = document.createElement("b"); name.textContent = T["up_" + u.id];
+        const desc = document.createElement("div"); desc.className = "desc"; desc.textContent = T["up_" + u.id + "_d"];
+        const pips = document.createElement("div"); pips.className = "pips";
+        pips.textContent = "●".repeat(lvl) + "○".repeat(max - lvl);
+        card.append(name, desc, pips);
+        if (lvl >= max) card.append(shopButton(T.max, "owned", null, true));
+        else {
+            const cost = u.costs[lvl];
+            card.append(shopButton(T.buy + " " + cost + "🪙", "", () =>
+                buy(cost, s => { s.upgrades[u.id] = lvl + 1; }), sv.coins < cost));
+        }
+        ug.appendChild(card);
+    });
+
+    const sg = $("skinGrid"); sg.innerHTML = "";
+    Object.entries(SKINS).forEach(([id, sk]) => {
+        const owned = sv.skins.includes(id), on = sv.skin === id;
+        const card = document.createElement("div"); card.className = "card";
+        const name = document.createElement("b"); name.textContent = T["skin_" + id];
+        const sw = document.createElement("div"); sw.className = "swatch";
+        sw.style.background = "linear-gradient(90deg," + sk.wing + "," + sk.body + "," + sk.stripe + "," + sk.cockpit + ")";
+        card.append(name, sw);
+        if (on) card.append(shopButton(T.equipped, "owned", null, true));
+        else if (owned) card.append(shopButton(T.equip, "", () => buy(0, s => { s.skin = id; })));
+        else card.append(shopButton(T.buy + " " + sk.price + "🪙", "", () =>
+            buy(sk.price, s => { s.skins.push(id); s.skin = id; }), sv.coins < sk.price));
+        sg.appendChild(card);
+    });
+}
+
+$("btnShop").onclick = showShop;
+$("shopBack").onclick = () => { $("shopScreen").classList.add("hidden"); showMenu(); };
+
 $("btnLb1").onclick = showLeaderboard;
 $("btnLb2").onclick = showLeaderboard;
 $("lbBack").onclick = () => { $("lbScreen").classList.add("hidden"); showMenu(); };
@@ -906,8 +1079,12 @@ canvas.addEventListener("pointercancel",stopShoot);
 function shoot(){
     const sx=player.x+30, sy=player.y-8;
     const a=Math.atan2(mouse.y-sy, mouse.x-sx);
-    bullets.push({x:sx,y:sy,vx:Math.cos(a)*11,vy:Math.sin(a)*11,life:90});
-    shootCooldown=9;
+    const n=1+U("multiShot")*2;               // 1, 3 or 5 bullets
+    for(let i=0;i<n;i++){
+        const ang=a+(i-(n-1)/2)*.13;
+        bullets.push({x:sx,y:sy,vx:Math.cos(ang)*11,vy:Math.sin(ang)*11,life:90});
+    }
+    shootCooldown=Math.max(3,9-Math.round(U("fireRate")*1.2));
 }
 
 function distance(a,b) {
@@ -1051,11 +1228,13 @@ function drawHeart(x,y,size,color) {
 
 function drawHUD() {
     // Hearts
-    for(let i=0;i<3;i++){
+    const maxL=3+U("maxLives");
+    const gap=maxL>3?58:70;
+    for(let i=0;i<maxL;i++){
         let active=i<lives;
         let pulse=active?Math.sin(frame*.1+i)*1.5:0;
 
-        drawHeart(50+i*70,40+pulse,48,
+        drawHeart(50+i*gap,40+pulse,maxL>3?42:48,
             active?"#ff398b":"#642b70");
     }
 
@@ -1125,7 +1304,7 @@ function drawPlayer() {
         [x+30,y+50],
         [x+40,y+36],
         [x+75,y+44]
-    ],"#a9caff");
+    ],skin.wing);
 
     // Main body
     polygon([
@@ -1135,14 +1314,14 @@ function drawPlayer() {
         [x+30,y+62],
         [x+21,y+50],
         [x+16,y+24]
-    ],"#b3d9ff");
+    ],skin.body);
 
     polygon([
         [x+30,y-12],
         [x+35,y+25],
         [x+30,y+62],
         [x+25,y+25]
-    ],"#667fda");
+    ],skin.stripe);
 
     // Cockpit
     polygon([
@@ -1150,7 +1329,7 @@ function drawPlayer() {
         [x+39,y+28],
         [x+30,y+39],
         [x+21,y+28]
-    ],"#ff4c9b");
+    ],skin.cockpit);
 
     rect(x+26,y+17,8,8,"#ffe3ff");
     rect(x+29,y+20,3,3,"#ffffff");
@@ -1318,15 +1497,20 @@ function update() {
     if(invincible>0) invincible--;
 
     // Crystals
+    const magnetR=U("magnet")?70+U("magnet")*45:0;
     crystals.forEach((c,i)=>{
         c.x-=c.speed;
+        if(magnetR){
+            const mx=player.x+30-c.x, my=player.y+30-c.y, md=Math.hypot(mx,my);
+            if(md<magnetR && md>1){ c.x+=mx/md*4; c.y+=my/md*4; }
+        }
 
         if(distance(
             {x:player.x+30,y:player.y+30},
             {x:c.x,y:c.y}
         )<34){
             score+=10;
-            coins++;
+            coins+=1+U("coinBoost");
             progress+=10;
 
             if(progress>=100){
